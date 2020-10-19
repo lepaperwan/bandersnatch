@@ -10,9 +10,10 @@ import re
 import shutil
 import sys
 import tempfile
+from abc import abstractmethod
 from datetime import datetime
 from pathlib import Path
-from typing import IO, Any, Generator, List, Set, Union
+from typing import Any, AnyStr, Generator, Generic, IO, List, Set, Union
 from urllib.parse import urlparse
 
 import aiohttp
@@ -36,6 +37,95 @@ def user_agent() -> str:
 SAFE_NAME_REGEX = re.compile(r"[^A-Za-z0-9.]+")
 USER_AGENT = user_agent()
 WINDOWS = bool(platform.system() == "Windows")
+
+
+class AIO(Generic[AnyStr]):
+    """Asynchronous version of typing.IO"""
+
+    __slots__ = ()
+
+    @property
+    @abstractmethod
+    def mode(self) -> str:
+        pass
+
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        pass
+
+    @abstractmethod
+    async def close(self) -> None:
+        pass
+
+    @property
+    @abstractmethod
+    def closed(self) -> bool:
+        pass
+
+    @abstractmethod
+    def fileno(self) -> int:
+        pass
+
+    @abstractmethod
+    async def flush(self) -> None:
+        pass
+
+    @abstractmethod
+    def isatty(self) -> bool:
+        pass
+
+    @abstractmethod
+    async def read(self, n: int = -1) -> AnyStr:
+        pass
+
+    @abstractmethod
+    def readable(self) -> bool:
+        pass
+
+    @abstractmethod
+    async def readline(self, limit: int = -1) -> AnyStr:
+        pass
+
+    @abstractmethod
+    async def readlines(self, hint: int = -1) -> List[AnyStr]:
+        pass
+
+    @abstractmethod
+    def seek(self, offset: int, whence: int = 0) -> int:
+        pass
+
+    @abstractmethod
+    def seekable(self) -> bool:
+        pass
+
+    @abstractmethod
+    def tell(self) -> int:
+        pass
+
+    @abstractmethod
+    async def truncate(self, size: int = None) -> int:
+        pass
+
+    @abstractmethod
+    def writable(self) -> bool:
+        pass
+
+    @abstractmethod
+    async def write(self, s: AnyStr) -> int:
+        pass
+
+    @abstractmethod
+    async def writelines(self, lines: List[AnyStr]) -> None:
+        pass
+
+    @abstractmethod
+    async def __aenter__(self) -> 'AIO[AnyStr]':
+        pass
+
+    @abstractmethod
+    async def __aexit__(self, type, value, traceback) -> None:
+        pass
 
 
 def make_time_stamp() -> str:
