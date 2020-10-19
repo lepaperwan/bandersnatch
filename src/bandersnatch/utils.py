@@ -1,4 +1,6 @@
+import asyncio
 import contextlib
+import functools
 import hashlib
 import logging
 import os
@@ -139,3 +141,28 @@ def bandersnatch_safe_name(name: str) -> str:
     bandersnatch also lower cases the returned name
     """
     return SAFE_NAME_REGEX.sub("-", name).lower()
+
+
+def run_in_executor(func_or_executor, executor=None):
+    """
+    Function decorator to automatically schedule the wrapped synchronous
+    function for execution in an executor (or the loop default if unspecified).
+
+    The wrapped method will raise RuntimeError if called outside a running
+    event loop.
+    """
+    if not callable(func_or_executor):
+        return functools.partial(run_in_executor, executor=func_or_executor)
+
+    @functools.wraps(func_or_executor)
+    async def wrapper(*args, **kwargs):
+        nonlocal executor
+
+        # loop.run_in_executor doesn't support kwargs making `partial`
+        # mandatory to support the generic use-case
+        func = functools.partial(func_or_executor, *args, **kwargs)
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(executor, func)
+
+    return wrapper()
