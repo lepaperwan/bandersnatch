@@ -127,7 +127,7 @@ class Storage:
         return paths
 
     def get_flock_path(self) -> PATH_TYPES:
-        raise NotImplementedError
+        return self.flock_path
 
     def initialize_plugin(self) -> None:
         """
