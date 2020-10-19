@@ -255,4 +255,4 @@ def run_in_executor(func_or_executor, executor=None):
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(executor, func)
 
-    return wrapper()
+    return wrapper
