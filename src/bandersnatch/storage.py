@@ -8,8 +8,8 @@ import logging
 import pathlib
 from collections import defaultdict
 from typing import (
-    IO,
     Any,
+    AsyncGenerator,
     Dict,
     Generator,
     Iterable,
@@ -25,6 +25,7 @@ import filelock
 import pkg_resources
 from packaging.utils import canonicalize_name
 
+from bandersnatch.utils import AIO
 from .configuration import BandersnatchConfig
 
 PATH_TYPES = Union[pathlib.Path, str]
@@ -106,7 +107,7 @@ class Storage:
     def canonicalize_package(name: str) -> str:
         return str(canonicalize_name(name))
 
-    def get_lock(self, path: str) -> filelock.BaseFileLock:
+    async def get_lock(self, path: str) -> filelock.BaseFileLock:
         """
         Retrieve the appropriate `FileLock` backend for this storage plugin
 
@@ -140,30 +141,35 @@ class Storage:
         # and check_match methods that are called in the fast path.
         pass
 
-    def hash_file(self, path: PATH_TYPES, function: str = "sha256") -> str:
+    async def hash_file(self, path: PATH_TYPES, function: str = "sha256") -> str:
         h = getattr(hashlib, function)()
-        with self.open_file(path, text=False) as f:
-            for chunk in iter(lambda: f.read(8192), b""):  # type: ignore
+        async with self.open_file(path, text=False) as f:
+            # This can be rewritten cleanly in Python 3.8 but breaks support
+            # for anything below...
+            chunk = await f.read(8192)
+            while chunk != b'':
                 h.update(chunk)
+                chunk = await f.read(8192)
         return str(h.hexdigest())
 
-    def iter_dir(self, path: PATH_TYPES) -> Generator[PATH_TYPES, None, None]:
+    async def iter_dir(self, path: PATH_TYPES) -> AsyncGenerator[PATH_TYPES, None, None]:
         """Iterate over the path, returning the sub-paths"""
         if not issubclass(type(path), pathlib.Path):
             path = self.PATH_BACKEND(str(path))
         assert isinstance(path, pathlib.Path)
-        yield from path.iterdir()
+        for dir in path.iterdir():
+            yield dir
 
-    @contextlib.contextmanager
-    def rewrite(
-        self, filepath: PATH_TYPES, mode: str = "w", **kw: Any
-    ) -> Generator[IO, None, None]:
+    @contextlib.asynccontextmanager
+    async def rewrite(
+            self, filepath: PATH_TYPES, mode: str = "w", **kw: Any
+    ) -> AsyncGenerator[AIO, None, None]:
         """Rewrite an existing file atomically to avoid programs running in
         parallel to have race conditions while reading."""
         raise NotImplementedError
 
-    @contextlib.contextmanager
-    def update_safe(self, filename: PATH_TYPES, **kw: Any) -> Generator[IO, None, None]:
+    @contextlib.asynccontextmanager
+    async def update_safe(self, filename: PATH_TYPES, **kw: Any) -> AsyncGenerator[AIO, None, None]:
         """Rewrite a file atomically.
 
         Clients are allowed to delete the tmpfile to signal that they don't
@@ -172,7 +178,7 @@ class Storage:
         """
         raise NotImplementedError
 
-    def find(self, root: PATH_TYPES, dirs: bool = True) -> str:
+    async def find(self, root: PATH_TYPES, dirs: bool = True) -> str:
         """A test helper simulating 'find'.
 
         Iterates over directories and filenames, given as relative paths to the
@@ -181,28 +187,28 @@ class Storage:
         """
         raise NotImplementedError
 
-    def compare_files(self, file1: PATH_TYPES, file2: PATH_TYPES) -> bool:
+    async def compare_files(self, file1: PATH_TYPES, file2: PATH_TYPES) -> bool:
         """
         Compare two files and determine whether they contain the same data. Return
         True if they match
         """
         raise NotImplementedError
 
-    def write_file(self, path: PATH_TYPES, contents: Union[str, bytes]) -> None:
+    async def write_file(self, path: PATH_TYPES, contents: Union[str, bytes]) -> None:
         """Write data to the provided path.  If **contents** is a string, the file will
         be opened and written in "r" + "utf-8" mode, if bytes are supplied it will be
         accessed using "rb" mode (i.e. binary write)."""
         raise NotImplementedError
 
-    @contextlib.contextmanager
-    def open_file(
+    @contextlib.asynccontextmanager
+    async def open_file(
         self, path: PATH_TYPES, text: bool = True
-    ) -> Generator[IO, None, None]:
+    ) -> Generator[AIO, None, None]:
         """Yield a file context to iterate over. If text is true, open the file with
         'rb' mode specified."""
         raise NotImplementedError
 
-    def read_file(
+    async def read_file(
         self,
         path: PATH_TYPES,
         text: bool = True,
@@ -213,37 +219,37 @@ class Storage:
         'rb' mode specified."""
         raise NotImplementedError
 
-    def delete(self, path: PATH_TYPES, dry_run: bool = False) -> int:
+    async def delete(self, path: PATH_TYPES, dry_run: bool = False) -> int:
         """Delete the provided path."""
         if not isinstance(path, pathlib.Path):
             path = pathlib.Path(path)
         log_prefix = "[DRY RUN] " if dry_run else ""
         logger.info(f"{log_prefix}Deleting path: {path!s}")
         if not dry_run:
-            if not self.exists(path):
+            if not await self.exists(path):
                 logger.debug(f"{path!s} does not exist. Skipping")
                 return 0
-            if self.is_file(path):
-                return self.delete_file(path, dry_run=dry_run)
+            if await self.is_file(path):
+                return await self.delete_file(path, dry_run=dry_run)
             else:
-                return self.rmdir(path, dry_run=dry_run, force=True)
+                return await self.rmdir(path, dry_run=dry_run, force=True)
         return 0
 
-    def delete_file(self, path: PATH_TYPES, dry_run: bool = False) -> int:
+    async def delete_file(self, path: PATH_TYPES, dry_run: bool = False) -> int:
         """Delete the provided path, recursively if necessary."""
         raise NotImplementedError
 
-    def copy_file(self, source: PATH_TYPES, dest: PATH_TYPES) -> None:
+    async def copy_file(self, source: PATH_TYPES, dest: PATH_TYPES) -> None:
         """Copy a file from **source** to **dest**"""
         raise NotImplementedError
 
-    def mkdir(
-        self, path: PATH_TYPES, exist_ok: bool = False, parents: bool = False
+    async def mkdir(
+            self, path: PATH_TYPES, exist_ok: bool = False, parents: bool = False
     ) -> None:
         """Create the provided directory"""
         raise NotImplementedError
 
-    def rmdir(
+    async def rmdir(
         self,
         path: PATH_TYPES,
         recurse: bool = False,
@@ -255,26 +261,26 @@ class Storage:
         If force is true, remove contents destructively."""
         raise NotImplementedError
 
-    def exists(self, path: PATH_TYPES) -> bool:
+    async def exists(self, path: PATH_TYPES) -> bool:
         """Check whether the provided path exists"""
         raise NotImplementedError
 
-    def is_dir(self, path: PATH_TYPES) -> bool:
+    async def is_dir(self, path: PATH_TYPES) -> bool:
         """Check whether the provided path is a directory."""
         raise NotImplementedError
 
-    def is_file(self, path: PATH_TYPES) -> bool:
+    async def is_file(self, path: PATH_TYPES) -> bool:
         """Check whether the provided path is a file."""
         raise NotImplementedError
 
-    def symlink(self, source: PATH_TYPES, dest: PATH_TYPES) -> None:
+    async def symlink(self, source: PATH_TYPES, dest: PATH_TYPES) -> None:
         """Create a symlink at **dest** that points back at **source**"""
         if not issubclass(type(dest), pathlib.Path):
             dest = self.PATH_BACKEND(dest)
         assert isinstance(dest, pathlib.Path)
         dest.symlink_to(source)
 
-    def get_hash(self, path: PATH_TYPES, function: str = "sha256") -> str:
+    async def get_hash(self, path: PATH_TYPES, function: str = "sha256") -> str:
         """Get the sha256sum of a given **path**"""
         raise NotImplementedError
 
